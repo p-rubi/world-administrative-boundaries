@@ -1,0 +1,20 @@
+[general]
+name=World Administrative Boundaries
+qgisMinimumVersion=3.28
+qgisMaximumVersion=4.99
+supportsQt6=True
+description=Download and load the administrative boundaries of the whole world: countries, states and provinces, districts and counties, with borders and coastlines, as polygons or lines. Open data from OpenStreetMap (Terrae).
+about=World Administrative Boundaries adds the boundaries of the world to your project in a few clicks: 255 countries and territories (level 0), their states, provinces and regions (level 1) and their districts, counties and municipalities (level 2), as polygons or as boundary lines (borders, internal boundaries and coastlines), at four levels of detail. Take the whole world or only the countries and divisions you choose, from a searchable list or by clicking on the map. The three levels fit one another exactly. The plugin downloads only the files a request needs from an online repository, checks them and keeps them, so they are reused and work offline afterwards; a local copy of the repository can be used instead. Data: Terrae (https://github.com/p-rubi/terrae), an open dataset by the same author built from OpenStreetMap, with its methodology published; Open Database License 1.0, (c) OpenStreetMap contributors. The plugin needs an internet connection the first time data is requested.
+version=0.1.0
+author=Terrae
+email=geo.prubi@gmail.com
+tags=boundaries,administrative,countries,world,borders,coastline,states,provinces,districts,adm0,adm1,adm2,openstreetmap,basemap,download,geopackage
+category=Web
+icon=icons/terrae.svg
+experimental=False
+deprecated=False
+hasProcessingProvider=no
+homepage=https://github.com/p-rubi/world-administrative-boundaries
+tracker=https://github.com/p-rubi/world-administrative-boundaries/issues
+repository=https://github.com/p-rubi/world-administrative-boundaries
+changelog=0.1.0 First version: countries (reference, de facto and disputed areas), first-level and second-level divisions; polygons and lines; two levels of detail; whole world or chosen countries and divisions, from a list or on the map; verified downloads kept for offline use; online repository or a local copy.

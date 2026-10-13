@@ -1,0 +1,5 @@
+{
+  "default_source": "https://huggingface.co/buckets/geodataset/terrae/resolve/",
+  "pointer": "https://raw.githubusercontent.com/p-rubi/world-administrative-boundaries/main/data-source.json",
+  "note": "default_source is the repository a fresh installation reads: a root URL (ending in /) or a folder. pointer is a small JSON file {\"source\": \"<root URL>\"} that supersedes it when it can be read, so the data can move without a new version of the plugin."
+}
