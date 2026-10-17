@@ -1,8 +1,12 @@
 # World Administrative Boundaries
 
 A QGIS plugin that adds the administrative boundaries of the whole world to your project in a few clicks:
-**countries**, **states and provinces**, **districts and counties**, as polygons or as boundary lines with borders
-and coastlines. Take the whole world, or only the countries and divisions you choose.
+**countries and territories (ADM0)** and each country's **first- and second-level administrative divisions (ADM1,
+ADM2)**, as polygons or as boundary lines with borders and coastlines. Take the whole world, or only the countries
+and divisions you choose.
+
+The divisions follow each country's own administrative structure: states and counties in the United States,
+autonomous communities and provinces in Spain, regions and departments in France.
 
 ![The countries of the world added from the toolbar](img/world-countries.png)
 

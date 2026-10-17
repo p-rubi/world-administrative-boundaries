@@ -1,7 +1,8 @@
 # World Administrative Boundaries
 
-Adds the administrative boundaries of the world to your project: countries, states and provinces, districts and
-counties, as polygons or lines. The data downloads by itself from the online repository; nothing needs setting up.
+Adds the administrative boundaries of the world to your project: countries and territories, and each country's
+first- and second-level administrative divisions, as polygons or lines. The data downloads by itself from the online
+repository; nothing needs setting up.
 
 ## Quick start
 
@@ -14,9 +15,10 @@ For a ready base map, open the arrow beside the toolbar button and pick **World 
 
 ## Choices
 
-- **Dataset:** Level 0, countries and territories (255); Level 1, states, provinces and regions; Level 2, districts,
-  counties and municipalities. Level 0 also comes in two other views: *de facto* (as administered) and
-  *disputed areas*.
+- **Dataset:** Level 0 (ADM0), the 255 countries, territories and special areas; Level 1 (ADM1), the first-level
+  administrative divisions of each country; Level 2 (ADM2), the second-level divisions within them. What a division
+  is depends on the country: states and counties in the United States, autonomous communities and provinces in Spain.
+  Level 0 also comes in two other views: *de facto* (as administered) and *disputed areas*.
 - **Level of detail:** Low (about 1,500 m, for world maps), Medium (150 m), High (15 m) or Native (the geometry of
   OpenStreetMap). Use Medium or finer for Level 2.
 - **Geometry:** polygons, lines, or both. Lines are classified: border, internal boundary, coastline.
