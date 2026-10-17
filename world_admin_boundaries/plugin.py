@@ -9,7 +9,7 @@ from qgis.PyQt.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox
                                  QLineEdit, QMenu, QPushButton, QTextBrowser, QToolButton, QVBoxLayout)
 from qgis.core import QgsApplication, QgsSettings
 
-from .compat import QAction, WARNING, exec_
+from .compat import QAction, INFO, WARNING, run_modal
 from .net import Cache, CachedHttpReader, Fetcher, QgisHttpReader, log
 from .panel import TerraePanel, level_note
 from .repository import LEVEL_NAMES, LocalReader, Repository, RepositoryError, human_size, is_url, normalise_location
@@ -173,8 +173,8 @@ class TerraeBoundariesPlugin(object):
                             self.set_setting("pointed_before", "|".join(sorted(self.known_defaults())))      # still not a choice
                         self._pointed = found
                         self.set_setting("pointed_source", found)
-                except Exception:
-                    pass
+                except Exception as e:     # no connection, or no pointer yet: the last known address is used
+                    log("The data address pointer could not be read ({}); using {}".format(e, self._pointed), INFO)
         return self._pointed
 
     def cache_dir(self):
@@ -243,7 +243,7 @@ class TerraeBoundariesPlugin(object):
 
     def open_settings(self):
         dlg = SettingsDialog(self, self.iface.mainWindow())
-        if exec_(dlg):
+        if run_modal(dlg):
             for k, v in dlg.values().items():
                 self.set_setting(k, v)
             self.ensure_repository(True)
@@ -314,7 +314,7 @@ class TerraeBoundariesPlugin(object):
             self.panel.btn_pick.setChecked(True)
 
     def show_help(self):
-        exec_(self.help_dialog())
+        run_modal(self.help_dialog())
 
     def help_dialog(self):
         dlg = QDialog(self.iface.mainWindow())

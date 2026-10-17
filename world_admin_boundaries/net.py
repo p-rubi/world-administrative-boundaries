@@ -16,7 +16,7 @@ from qgis.PyQt.QtCore import QEventLoop, QObject, QTimer, QUrl, QCoreApplication
 from qgis.PyQt.QtNetwork import QNetworkRequest
 from qgis.core import QgsBlockingNetworkRequest, QgsFileDownloader, QgsMessageLog, QgsNetworkAccessManager, QgsVectorLayer
 
-from .compat import NET_NO_ERROR, INFO, WARNING, exec_
+from .compat import NET_NO_ERROR, INFO, WARNING, run_modal
 from .repository import RepositoryError, is_url, join, human_size
 
 LOG_TAG = "Terrae"
@@ -48,7 +48,7 @@ class CachedHttpReader(QgisHttpReader):
 
     def __init__(self, root, folder):
         super().__init__(root)
-        self.folder = os.path.join(folder, "meta", hashlib.sha1(root.encode("utf-8")).hexdigest()[:16])
+        self.folder = os.path.join(folder, "meta", hashlib.sha256(root.encode("utf-8")).hexdigest()[:16])
         self.offline = False
 
     def read(self, rel):
@@ -86,7 +86,7 @@ def final_url(url, hops=5, timeout_ms=30000):
             reply.finished.connect(loop.quit)
             QTimer.singleShot(timeout_ms, loop.quit)
             if not reply.isFinished():
-                exec_(loop)
+                run_modal(loop)
             done = reply.isFinished()
             target = reply.attribute(QNetworkRequest.Attribute.RedirectionTargetAttribute) if done else None
             if not done:

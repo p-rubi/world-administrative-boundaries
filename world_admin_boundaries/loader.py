@@ -2,7 +2,6 @@
 """From a file on disk to a layer in the project: the table, the filter, a plain style, the credit."""
 import os
 
-from qgis.PyQt.QtGui import QColor
 from qgis.core import (QgsCategorizedSymbolRenderer, QgsFillSymbol, QgsLineSymbol, QgsProject, QgsRendererCategory,
                        QgsSingleSymbolRenderer, QgsVectorLayer)
 

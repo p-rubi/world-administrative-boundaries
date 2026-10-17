@@ -22,6 +22,6 @@ _codes = getattr(QgsBlockingNetworkRequest, "ErrorCode", QgsBlockingNetworkReque
 NET_NO_ERROR = _codes.NoError
 
 
-def exec_(obj, *args):
-    """Run a dialog or a menu: `exec` in Qt 6, `exec_` in old Qt 5 bindings."""
-    return (obj.exec if hasattr(obj, "exec") else obj.exec_)(*args)
+def run_modal(obj, *args):
+    """Run a dialog, a menu or an event loop until it ends. `exec` exists in Qt 6 and in the Qt 5 bindings of QGIS."""
+    return obj.exec(*args)

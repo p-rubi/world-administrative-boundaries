@@ -3,9 +3,8 @@
 divisions chosen in a list, by search or on the map), and the two things to do with it (add to the map, or save)."""
 import os
 import traceback
-from urllib.parse import urlsplit
 
-from qgis.PyQt.QtCore import Qt, QTimer, QCoreApplication, QUrl
+from qgis.PyQt.QtCore import Qt, QTimer, QCoreApplication
 from qgis.PyQt.QtWidgets import (QAbstractItemView, QComboBox, QDockWidget, QFileDialog, QFormLayout, QFrame, QGroupBox,
                                  QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton,
                                  QRadioButton, QScrollArea, QSizePolicy, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
@@ -32,6 +31,7 @@ def level_note(lv):
 
 
 class TerraePanel(QDockWidget):
+
     def __init__(self, iface, app, parent=None):
         super().__init__("World Administrative Boundaries", parent or iface.mainWindow())
         self.setObjectName("TerraeBoundariesPanel")
@@ -311,6 +311,7 @@ class TerraePanel(QDockWidget):
             return
         self.btn_add.setEnabled(self.repo is not None and self.format_id() in LOADABLE and self._job is None)
         self._schedule()
+
     # ---- the list of countries and divisions -------------------------------------------------------------------------
     def _fill_tree(self):
         self._building = True
@@ -528,6 +529,7 @@ class TerraePanel(QDockWidget):
         if any(i.subset for i in items):
             text += " Divisions are read from their country file with a filter."
         self.lbl_estimate.setText(text)
+
     # ---- running ---------------------------------------------------------------------------------------------------
     def _status(self, text, level=INFO):
         self.lbl_status.setText(text)
@@ -700,7 +702,8 @@ class TerraePanel(QDockWidget):
             if dest.isValid() and layer.crs() != dest:
                 try:
                     ext = QgsCoordinateTransform(layer.crs(), dest, QgsProject.instance()).transformBoundingBox(ext)
-                except Exception:
+                except Exception as e:     # a layer whose extent cannot be transformed is left out of the zoom
+                    log("Zoom to the added layers: {} left out ({})".format(layer.name(), e), WARNING)
                     continue
             box.combineExtentWith(ext)
         if not box.isNull() and not box.isEmpty():

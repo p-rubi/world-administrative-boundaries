@@ -11,6 +11,7 @@ from qgis.core import (QgsCoordinateReferenceSystem, QgsCoordinateTransform, Qgs
 from qgis.gui import QgsMapToolEmitPoint
 
 from .loader import layer_source
+from .net import log
 from .repository import RepositoryError
 
 INDEX_GROUP = "Terrae \u00b7 selection map"
@@ -186,5 +187,5 @@ class MapPicker(QObject):
         try:
             self.canvas.flashGeometries([geometry], QgsCoordinateReferenceSystem(WGS84),
                                         QColor(255, 180, 0, 60), QColor(255, 180, 0, 200), 2, 250)
-        except Exception:
-            pass
+        except Exception as e:        # the flash only confirms a click: without it the selection still works
+            log("Could not highlight the picked feature: {}".format(e))
