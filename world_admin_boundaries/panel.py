@@ -4,8 +4,9 @@ divisions chosen in a list, by search or on the map), and the two things to do w
 import os
 import traceback
 
-from qgis.PyQt.QtCore import Qt, QTimer, QCoreApplication
-from qgis.PyQt.QtWidgets import (QAbstractItemView, QComboBox, QDockWidget, QFileDialog, QFormLayout, QFrame, QGroupBox,
+from qgis.PyQt.QtCore import Qt, QTimer, QCoreApplication, QPointF, QSize
+from qgis.PyQt.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
+from qgis.PyQt.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDockWidget, QFileDialog, QFormLayout, QFrame, QGroupBox,
                                  QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton,
                                  QRadioButton, QScrollArea, QSizePolicy, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 from qgis.core import QgsCoordinateTransform, QgsProject, QgsRectangle
@@ -25,6 +26,49 @@ LARGE = 400 * 1000 * 1000                       # ask before downloading more th
 PICK_DEPTHS = ["chooses countries", "chooses first-level divisions", "chooses second-level divisions"]
 
 
+# a manifest preset the plugin runs as one of its views: preset id -> (view, level of detail)
+PRESET_VIEWS = {"world_countries": ("cartographic", "low")}
+STATE_COLOURS = {"checking": "#8a8f98", "connected": "#2e9e5b", "local": "#4a7c9b", "offline": "#d99a1a",
+                 "not_connected": "#d9534f", "error": "#c0392b"}
+RETRY_STATES = ("offline", "not_connected", "error")      # the states in which trying again can change something
+
+
+def status_icon(state):
+    """A small round icon for the state of the connection: colour and a sign inside, so it reads without colour too."""
+    size = 32
+    px = QPixmap(size, size)
+    px.fill(Qt.GlobalColor.transparent)
+    p = QPainter(px)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QColor(STATE_COLOURS.get(state, STATE_COLOURS["checking"])))
+    p.drawEllipse(2, 2, 28, 28)
+    white = QColor("white")
+    pen = QPen(white, 3.6)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    if state in ("connected", "local"):                                   # a tick
+        p.drawLine(QPointF(9, 17), QPointF(14, 22))
+        p.drawLine(QPointF(14, 22), QPointF(23, 11))
+    elif state == "offline":                                              # a dash
+        p.drawLine(QPointF(9, 16), QPointF(23, 16))
+    elif state == "not_connected":                                        # a cross
+        p.drawLine(QPointF(10, 10), QPointF(22, 22))
+        p.drawLine(QPointF(22, 10), QPointF(10, 22))
+    elif state == "error":                                                # an exclamation mark
+        p.drawLine(QPointF(16, 8), QPointF(16, 18))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(white)
+        p.drawEllipse(QPointF(16, 23.5), 2.2, 2.2)
+    else:                                                                 # checking: three dots
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(white)
+        for x in (9, 16, 23):
+            p.drawEllipse(QPointF(x, 16), 2.4, 2.4)
+    p.end()
+    return QIcon(px)
+
+
 def level_note(lv):
     """The label of a level, as it reads after its name: about 150 m, or a phrase that keeps its capital."""
     return lv.label[0].lower() + lv.label[1:] if lv.label.startswith("About") else lv.label
@@ -41,6 +85,8 @@ class TerraePanel(QDockWidget):
         self.fetcher = None
         self._job = None                    # (callback, description) of the running fetch
         self._building = False
+        self._geometry_choice = None        # the geometry chosen before a layer that fixes its own (a view) was selected
+        self.state = "checking"
         self.confirm = self._confirm        # replaced in tests
         self.picker = MapPicker(iface, self)
         self.picker.picked.connect(self._picked)
@@ -60,14 +106,25 @@ class TerraePanel(QDockWidget):
         col.setContentsMargins(8, 8, 8, 8)
 
         head = QHBoxLayout()
-        self.lbl_release = QLabel("Not connected")
+        self.btn_state = QToolButton()
+        self.btn_state.setAutoRaise(True)
+        self.btn_state.setIconSize(QSize(16, 16))
+        self.btn_state.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_state.clicked.connect(self._state_clicked)
+        self.lbl_release = QLabel("Checking connection\u2026")
         self.lbl_release.setWordWrap(True)
         self.lbl_release.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)     # a long address must not widen the panel
+        self.btn_retry = QToolButton()
+        self.btn_retry.setText("Retry")
+        self.btn_retry.setToolTip("Try to reach the data repository again")
+        self.btn_retry.clicked.connect(lambda: self.app.check_async(True))
         self.btn_source = QToolButton()
         self.btn_source.setText("Settings\u2026")
         self.btn_source.setToolTip("Data source, release and where downloads are kept")
         self.btn_source.clicked.connect(lambda: self.app.open_settings())
+        head.addWidget(self.btn_state)
         head.addWidget(self.lbl_release, 1)
+        head.addWidget(self.btn_retry)
         head.addWidget(self.btn_source)
         col.addLayout(head)
 
@@ -82,11 +139,17 @@ class TerraePanel(QDockWidget):
             # the panel is a side panel: the selectors take the width there is instead of asking for their longest entry
             combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             combo.setMinimumContentsLength(22)
-        form.addRow("Dataset", self.cmb_dataset)
+        form.addRow("Layer", self.cmb_dataset)
         form.addRow("Level of detail", self.cmb_level)
         form.addRow("Geometry", self.cmb_geometry)
         form.addRow("Format", self.cmb_format)
+        self.chk_style = QCheckBox("Apply Terrae symbology")
+        self.chk_style.setToolTip("Style the new layers like the Terrae maps. Turn it off to get QGIS's default look.")
+        self.chk_style.setChecked(self.app.setting("symbology", True, bool))
+        self.chk_style.toggled.connect(lambda on: self.app.set_setting("symbology", on))
+        form.addRow("", self.chk_style)
         col.addLayout(form)
+        self.set_state("checking")
         self.lbl_about = QLabel("")
         self.lbl_about.setWordWrap(True)
         small = self.lbl_about.font()
@@ -112,7 +175,7 @@ class TerraePanel(QDockWidget):
         self.txt_search.setClearButtonEnabled(True)
         self.btn_pick = QPushButton("Pick on map")
         self.btn_pick.setCheckable(True)
-        self.btn_pick.setToolTip("Click countries on the map to choose them. With a dataset of divisions, the first click on a "
+        self.btn_pick.setToolTip("Click countries on the map to choose them. With a layer of divisions, the first click on a "
                                  "country shows its divisions and the next clicks choose among them.")
         self.cmb_pick = QComboBox()
         self.cmb_pick.setToolTip("What a click on the map chooses")
@@ -194,7 +257,50 @@ class TerraePanel(QDockWidget):
         self._coverage_changed()
 
     # ---- the repository --------------------------------------------------------------------------------------------
-    def set_repository(self, repo, fetcher, error=None):
+    def _controls(self):
+        return (self.cmb_dataset, self.cmb_level, self.cmb_geometry, self.cmb_format, self.rad_world, self.rad_select,
+                self.btn_add, self.btn_save)
+
+    def set_checking(self):
+        """The repository is being read: the controls wait, and the indicator says so."""
+        for w in self._controls():
+            w.setEnabled(False)
+        self.grp_select.setEnabled(False)
+        self.set_state("checking")
+
+    def set_state(self, state, detail=""):
+        """The connection indicator: an icon, a short text, and a tooltip with the details."""
+        self.state = state
+        repo = self.repo if state in ("connected", "local", "offline") else None
+        where = ""
+        if repo is not None:
+            where = repo.location if is_url(repo.location) else "folder " + repo.location
+        release = "Terrae {}".format(repo.version) if repo is not None else "Terrae"
+        text = {"checking": "Checking connection\u2026", "not_connected": "Not connected", "error": "Connection error",
+                "local": release + " (local folder)", "offline": release + " (offline)"}.get(state, release)
+        credit = repo.manifest.get("attribution", "") if repo is not None else ""
+        tips = {
+            "checking": "Checking connection\u2026\nReading the list of data from the repository.",
+            "connected": "Connected\nRelease {} \u00b7 {}\n{}".format(repo.version if repo else "", credit, where),
+            "local": "Local folder\nRelease {} \u00b7 {}\n{}".format(repo.version if repo else "", credit, where),
+            "offline": "Offline \u2014 the repository could not be reached; the saved copy of its list is used (release {}).\n"
+                       "Files already downloaded stay available. Click to try again.\n{}".format(repo.version if repo else "", where),
+            "not_connected": "Not connected \u2014 the data service could not be reached. Check the internet connection, "
+                             "or the proxy settings of QGIS. Click to try again.{}".format("\n" + detail if detail else ""),
+            "error": "Connection error \u2014 {}\nClick to try again.".format(detail or "the repository could not be read."),
+        }
+        self.btn_state.setIcon(status_icon(state))
+        self.lbl_release.setText(text)
+        for w in (self.btn_state, self.lbl_release):
+            w.setToolTip(tips.get(state, text))
+        self.btn_state.setEnabled(True)
+        self.btn_retry.setVisible(state in RETRY_STATES)
+
+    def _state_clicked(self):
+        if self.state in RETRY_STATES:
+            self.app.check_async(True)
+
+    def set_repository(self, repo, fetcher, error=None, state=None, detail=""):
         if self.fetcher is not None and self.fetcher is not fetcher:
             for signal in (self.fetcher.progress, self.fetcher.finished, self.fetcher.failed, self.fetcher.canceled):
                 try:
@@ -209,12 +315,11 @@ class TerraePanel(QDockWidget):
         self.tree.clear()
         self._building = False
         ok = repo is not None
-        for w in (self.cmb_dataset, self.cmb_level, self.cmb_geometry, self.cmb_format, self.rad_world, self.rad_select,
-                  self.btn_add, self.btn_save):
+        for w in self._controls():
             w.setEnabled(ok)
         self.grp_select.setEnabled(ok and self.rad_select.isChecked())
         if not ok:
-            self.lbl_release.setText("No repository")
+            self.set_state(state or "error", detail or error or "")
             self.lbl_about.setText("")
             self.lbl_estimate.setText("")
             self._status(error or "Set the data source to start.", WARNING)
@@ -223,12 +328,22 @@ class TerraePanel(QDockWidget):
         fetcher.finished.connect(self._on_finished)
         fetcher.failed.connect(self._on_failed)
         fetcher.canceled.connect(self._on_canceled)
-        where = repo.location if is_url(repo.location) else "folder " + repo.location
-        self.lbl_release.setText("Terrae {}{}".format(repo.version, "" if is_url(repo.location) else " (local folder)"))
-        self.lbl_release.setToolTip("Release {} \u00b7 {}\n{}".format(repo.version, repo.manifest.get("attribution", ""), where))
+        self.set_state(state or ("connected" if is_url(repo.location) else "local"), detail)
         self._building = True
-        for d in repo.datasets:
-            self.cmb_dataset.addItem(d["title"], d["id"])
+        first = -1
+        for title, entries in repo.selector():
+            self.cmb_dataset.addItem(title)                 # a heading: bold, and not a choice
+            heading = self.cmb_dataset.model().item(self.cmb_dataset.count() - 1)
+            heading.setFlags(Qt.ItemFlag.NoItemFlags)
+            font = QFont(self.cmb_dataset.font())
+            font.setBold(True)
+            heading.setFont(font)
+            for d in entries:
+                if first < 0:
+                    first = self.cmb_dataset.count()
+                self.cmb_dataset.addItem(repo.label(d), d["id"])
+                self.cmb_dataset.setItemData(self.cmb_dataset.count() - 1, d.get("description", ""), Qt.ItemDataRole.ToolTipRole)
+        self.cmb_dataset.setCurrentIndex(max(first, 0))
         self._building = False
         self._dataset_changed()
         self._status("{} \u00b7 {} countries and territories, {:,} first-level and {:,} second-level divisions."
@@ -251,10 +366,29 @@ class TerraePanel(QDockWidget):
     def coverage(self):
         return "world" if self.rad_world.isChecked() else "places"
 
+    def _fixed(self):
+        """Does the selected layer fix its own geometry (a view does)?"""
+        return bool(self.repo is not None and self.dataset_id() and self.repo.fixed_geometries(self.dataset_id()))
+
+    def _apply_fixed_geometry(self, d):
+        """A view is made of given geometries: the selector shows them and is locked; the user's own choice comes back after."""
+        fixed = d.get("fixed_geometries")
+        self._building = True
+        if fixed:
+            if self._geometry_choice is None:
+                self._geometry_choice = self.cmb_geometry.currentData()
+            self.cmb_geometry.setCurrentIndex(max(self.cmb_geometry.findData("both" if len(fixed) > 1 else fixed[0]), 0))
+        elif self._geometry_choice is not None:
+            self.cmb_geometry.setCurrentIndex(max(self.cmb_geometry.findData(self._geometry_choice), 0))
+            self._geometry_choice = None
+        self._building = False
+        self.cmb_geometry.setEnabled(not fixed and self.repo is not None and self._job is None)
+
     def _dataset_changed(self, *_):
         if self._building or self.repo is None or self.dataset_id() is None:
             return
         d = self.repo.dataset(self.dataset_id())
+        self._apply_fixed_geometry(d)
         keep = self.level_id()
         self._building = True
         self.cmb_level.clear()
@@ -539,8 +673,9 @@ class TerraePanel(QDockWidget):
     def _set_busy(self, busy):
         self.bar.setVisible(busy)
         self.btn_cancel.setVisible(busy)
-        for w in (self.btn_save, self.cmb_dataset, self.cmb_level, self.cmb_geometry, self.cmb_format):
+        for w in (self.btn_save, self.cmb_dataset, self.cmb_level, self.cmb_format):
             w.setEnabled(not busy and self.repo is not None)
+        self.cmb_geometry.setEnabled(not busy and self.repo is not None and not self._fixed())
         self.btn_add.setEnabled(not busy and self.repo is not None and self.format_id() in LOADABLE)
 
     def _confirm(self, text):
@@ -625,7 +760,7 @@ class TerraePanel(QDockWidget):
             layers, problems = [], []
             for item in items:
                 try:
-                    layers.append((item, make_layer(paths[item.asset], item, self.repo)))
+                    layers.append((item, make_layer(paths[item.asset], item, self.repo, self.chk_style.isChecked())))
                 except RepositoryError as e:
                     problems.append(str(e))
             was_empty = not QgsProject.instance().mapLayers()
@@ -681,6 +816,9 @@ class TerraePanel(QDockWidget):
         if self.repo is None:
             self._problem("No repository: set the data source first.")
             return False
+        view = PRESET_VIEWS.get(preset.get("id"))
+        if view and view[1] in [lv.id for lv in self.repo.levels]:      # the preset is one of the plugin's views, with its own symbology
+            return self.quick_add(view[0], view[1], ["polygons", "lines"])
         items = []
         try:
             for part in preset["load"]:
@@ -758,11 +896,11 @@ class TerraePanel(QDockWidget):
 
     def _picked(self, key, adm1, adm2):
         if self.repo.dataset(self.dataset_id())["entities"] != "units":
-            self._status("Picking on the map chooses countries; this dataset is chosen in the list.", WARNING)
+            self._status("Picking on the map chooses countries; this layer is chosen in the list.", WARNING)
             return
         state = self.select(key, adm1 or None, adm2 or None, toggle=True)
         if state is None:
-            self._status("This place is not in the list of the dataset.", WARNING)
+            self._status("This place is not in the list of the layer.", WARNING)
             return
         name = self.tree.currentItem().text(0) if self.tree.currentItem() else key
         self._status("{} {}.".format(name, "chosen" if state else "removed"))

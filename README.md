@@ -14,6 +14,9 @@ autonomous communities and provinces in Spain, regions and departments in France
   50,231 second-level features.
 - **Polygons or lines**: lines are classified as international border, internal boundary or coastline, so borders
   can be drawn without coasts.
+- **All levels in one layer**: every administrative level and the coastline as lines, without fill and with the
+  Terrae map colours; the widths follow the map scale and the finer levels fade out when zoomed out, so it stays
+  clean at any scale. Also a Coastline layer and a Cartographic base for ready-made maps.
 - **Four levels of detail**: from the native geometry of OpenStreetMap to about 15 m, 150 m and 1,500 m, for
   anything from large-scale maps to world maps.
 - **Only what you ask for is downloaded**: one country is one small file; a single province is read from the file

@@ -16,7 +16,7 @@ from qgis.PyQt.QtCore import QEventLoop, QObject, QTimer, QUrl, QCoreApplication
 from qgis.PyQt.QtNetwork import QNetworkRequest
 from qgis.core import QgsBlockingNetworkRequest, QgsFileDownloader, QgsMessageLog, QgsNetworkAccessManager, QgsVectorLayer
 
-from .compat import NET_NO_ERROR, INFO, WARNING, run_modal
+from .compat import NET_NO_ERROR, INFO, WARNING
 from .repository import RepositoryError, is_url, join, human_size
 
 LOG_TAG = "Terrae"
@@ -27,18 +27,35 @@ def log(message, level=INFO):
     QgsMessageLog.logMessage(message, LOG_TAG, level)
 
 
+def _kind_of(request):
+    """Why a request failed, as far as it can be told: "server" when the other end answered with an HTTP error (it was
+    reached), "network" when there was no answer at all (no connection, unknown host, refused, timed out). QGIS reports both
+    under one error code, so the HTTP status is what tells them apart."""
+    try:
+        status = request.reply().attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+    except Exception:
+        status = None
+    return "server" if isinstance(status, int) and status >= 100 else "network"
+
+
 class QgisHttpReader(object):
     """Reads the small files of a repository behind a URL, through QGIS's network manager (proxy, authentication)."""
 
+    TIMEOUT_MS = 20000          # a small file that has not arrived by then is not going to: fail, so that it can be tried again
+
     def __init__(self, root):
         self.root = root
+        self.timeout_ms = self.TIMEOUT_MS
 
     def read(self, rel):
         url = join(self.root, rel)
         request = QgsBlockingNetworkRequest()
-        code = request.get(QNetworkRequest(QUrl(url)), True)
+        qt_request = QNetworkRequest(QUrl(url))
+        if hasattr(qt_request, "setTransferTimeout"):          # Qt 5.15 and later
+            qt_request.setTransferTimeout(self.timeout_ms)
+        code = request.get(qt_request, True)
         if code != NET_NO_ERROR:
-            raise RepositoryError("Cannot read {}: {}".format(url, request.errorMessage() or "network error"))
+            raise RepositoryError("Cannot read {}: {}".format(url, request.errorMessage() or "network error"), _kind_of(request))
         return bytes(request.reply().content())
 
 
@@ -86,7 +103,7 @@ def final_url(url, hops=5, timeout_ms=30000):
             reply.finished.connect(loop.quit)
             QTimer.singleShot(timeout_ms, loop.quit)
             if not reply.isFinished():
-                run_modal(loop)
+                loop.exec()
             done = reply.isFinished()
             target = reply.attribute(QNetworkRequest.Attribute.RedirectionTargetAttribute) if done else None
             if not done:
@@ -430,7 +447,8 @@ def copy_to(paths_by_asset, folder, repo, pulse=None):
     out = {}
     for asset, path in paths_by_asset.items():
         ext = os.path.splitext(path)[1]
-        name = "terrae-{}-{}-{}-{}{}{}".format(asset.dataset.replace("_", "-"), repo.version, asset.level, asset.geometry,
+        base = repo.dataset(asset.dataset).get("base", asset.dataset)          # a view saves the files of the dataset it is made from
+        name = "terrae-{}-{}-{}-{}{}{}".format(base.replace("_", "-"), repo.version, asset.level, asset.geometry,
                                                "-" + asset.key if asset.key else "", ext)
         dest = os.path.join(folder, name)
         if os.path.abspath(dest) != os.path.abspath(path):

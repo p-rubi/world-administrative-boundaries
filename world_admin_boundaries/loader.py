@@ -2,9 +2,10 @@
 """From a file on disk to a layer in the project: the table, the filter, a plain style, the credit."""
 import os
 
-from qgis.core import (QgsCategorizedSymbolRenderer, QgsFillSymbol, QgsLineSymbol, QgsProject, QgsRendererCategory,
-                       QgsSingleSymbolRenderer, QgsVectorLayer)
+from qgis.core import (QgsCategorizedSymbolRenderer, QgsFillSymbol, QgsLineSymbol, QgsProject, QgsProperty, QgsRendererCategory,
+                       QgsRuleBasedRenderer, QgsSingleSymbolRenderer, QgsVectorLayer)
 
+from .compat import STROKE_WIDTH
 from .repository import RepositoryError
 
 GROUP_PROPERTY = "terrae/group"
@@ -35,6 +36,20 @@ FILLS = {  # dataset: fill, outline, outline width
 }
 
 
+# The palette of the maps in the Terrae repository, for the layers made for cartography (the views).
+PALETTE = {"land": "#f4efe4", "adm0": "#2f2c28", "adm1": "#7b5ea7", "adm2": "#b9a98c", "coast": "#4f89a6"}
+# "All levels", from the lowest level to the highest, which is the order they are drawn in: kind, label, colour, width in mm
+# at 1:250,000 or closer, width at the far scale, the far scale, and the scale beyond which the level is not drawn (0 = always).
+# The widths fall smoothly with the scale and the finer levels disappear when zoomed out, so that the map never clogs.
+ALL_LEVELS = [
+    ("adm2_boundary", "Second-level boundary", PALETTE["adm2"], 0.26, 0.10, 6000000, 7000000),
+    ("coastline", "Coastline", PALETTE["coast"], 0.40, 0.15, 100000000, 0),
+    ("adm1_boundary", "First-level boundary", PALETTE["adm1"], 0.50, 0.18, 50000000, 50000000),
+    ("adm0_boundary", "Country boundary", PALETTE["adm0"], 0.80, 0.30, 100000000, 0),
+]
+NEAR_SCALE = 250000
+
+
 def layer_source(path, asset):
     """What QGIS opens: a GeoPackage is addressed by file and table; the other formats hold one layer."""
     if asset.format == "gpkg":
@@ -42,7 +57,46 @@ def layer_source(path, asset):
     return path
 
 
+def _line(colour, width, width_expression=None):
+    symbol = QgsLineSymbol.createSimple({"line_color": colour, "line_width": str(width), "line_width_unit": "MM",
+                                         "capstyle": "round", "joinstyle": "round"})
+    if width_expression:
+        symbol.symbolLayer(0).setDataDefinedProperty(STROKE_WIDTH, QgsProperty.fromExpression(width_expression))
+    return symbol
+
+
+def _style_all_levels(layer, asset):
+    """One layer of lines, no fill: the levels in their own colours, thinner and fewer as the scale gets smaller."""
+    root = QgsRuleBasedRenderer.Rule(None)
+    for kind, label, colour, near, far, far_scale, hidden_beyond in ALL_LEVELS:
+        expression = "scale_linear(@map_scale, {}, {}, {}, {})".format(NEAR_SCALE, far_scale, near, far)
+        rule = QgsRuleBasedRenderer.Rule(_line(colour, near, expression), 0, hidden_beyond, '"line_kind" = \'{}\''.format(kind), label)
+        root.appendChild(rule)
+    renderer = QgsRuleBasedRenderer(root)
+    renderer.setUsingSymbolLevels(True)          # the rules are drawn in the order above, whatever the order of the features
+    layer.setRenderer(renderer)
+
+
+def _style_coastline(layer, asset):
+    layer.setRenderer(QgsSingleSymbolRenderer(_line(PALETTE["coast"], 0.2)))
+
+
+def _style_cartographic(layer, asset):
+    if asset.geometry == "polygons":
+        layer.setRenderer(QgsSingleSymbolRenderer(QgsFillSymbol.createSimple({"color": PALETTE["land"], "outline_style": "no"})))
+        return
+    categories = [QgsRendererCategory("land_boundary", _line(PALETTE["adm0"], 0.35), "Country boundary"),
+                  QgsRendererCategory("coastline", _line(PALETTE["coast"], 0.2), "Coastline")]
+    layer.setRenderer(QgsCategorizedSymbolRenderer("line_kind", categories))
+
+
+VIEW_STYLES = {"all_levels": _style_all_levels, "coastline": _style_coastline, "cartographic": _style_cartographic}
+
+
 def style(layer, asset):
+    if asset.dataset in VIEW_STYLES:
+        VIEW_STYLES[asset.dataset](layer, asset)
+        return
     if asset.geometry == "polygons":
         fill, line, width = FILLS.get(asset.dataset, FILLS["adm0"])
         symbol = QgsFillSymbol.createSimple({"color": fill, "outline_color": line, "outline_width": str(width),
@@ -62,8 +116,9 @@ def style(layer, asset):
     layer.setRenderer(QgsCategorizedSymbolRenderer("line_kind", categories))
 
 
-def make_layer(path, item, repo):
-    """The layer of one plan item, checked: a layer that cannot be read, or that the filter leaves empty, is an error."""
+def make_layer(path, item, repo, symbology=True):
+    """The layer of one plan item, checked: a layer that cannot be read, or that the filter leaves empty, is an error.
+    With symbology False the layer keeps the default look QGIS gives a new layer."""
     asset = item.asset
     if not os.path.isfile(path):
         raise RepositoryError("{} is not on this computer.".format(path))
@@ -76,7 +131,8 @@ def make_layer(path, item, repo):
         layer.updateExtents()
     if layer.featureCount() == 0:
         raise RepositoryError("{}: no feature for this selection.".format(item.title))
-    style(layer, asset)
+    if symbology:
+        style(layer, asset)
     credit = repo.manifest.get("attribution", "")
     try:
         layer.serverProperties().setAttribution(credit)
